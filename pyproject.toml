@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dynamixel-sdk-wrapper"
+version = "0.1.0"
+description = "A command-driven Python wrapper for the Dynamixel SDK"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = [
+    "dynamixel-sdk",
+]
+
+[project.urls]
+Homepage = "https://github.com/engineerm-jp/dynamixel-sdk-python-wrapper"
+Issues = "https://github.com/engineerm-jp/dynamixel-sdk-python-wrapper/issues"
+
+[tool.setuptools.packages.find]
+include = ["dynamixel_sdk_wrapper*"]
