@@ -5,16 +5,17 @@ A command-driven Python wrapper for the [Dynamixel SDK](https://github.com/ROBOT
 ## Features
 
 - **Command-based API** — read, write, sync-read, sync-write, and compound operations through typed dataclass commands
-- **Model-aware** — register addresses and lengths are resolved from per-model control tables (currently supports XC330)
+- **Model-aware** — register addresses and lengths are resolved from per-model control tables
 - **Automatic signed conversion** — position, velocity, and current values are correctly sign-extended
 - **Servo lifecycle management** — `add_servo()` handles ping, mode setting, limits, and EEPROM configuration with retries
 - **Extensible** — add new servo models by adding entries to the control table dict
 
 ## Supported Models
 
-| Model  | Status |
-|--------|--------|
-| XC330  | ✅ Supported |
+| Model       | Status |
+|-------------|--------|
+| XC330       | ✅ Supported |
+| XM430-W350  | ✅ Supported |
 
 > To add a new model, add its control table to `dynamixel_sdk_wrapper/control_tables.py`.
 
