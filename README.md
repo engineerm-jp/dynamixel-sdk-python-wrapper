@@ -12,12 +12,12 @@ A command-driven Python wrapper for the [Dynamixel SDK](https://github.com/ROBOT
 
 ## Supported Models
 
-| Model       | Status |
-|-------------|--------|
-| XC330       | ✅ Supported |
-| XM430-W350  | ✅ Supported |
+| Model       | Status | Control Table |
+|-------------|--------|---------------|
+| XC330       | ✅ Supported | [e-Manual](https://emanual.robotis.com/docs/en/dxl/x/xc330-t288/#control-table) |
+| XM430-W350  | ✅ Supported | [e-Manual](hhttps://emanual.robotis.com/docs/en/dxl/x/xm430-w350/#control-table) |
 
-> To add a new model, add its control table to `dynamixel_sdk_wrapper/control_tables.py`.
+> To add a new model, find its control table on the [ROBOTIS e-Manual](https://emanual.robotis.com/docs/en/dxl/) and add the register entries to `dynamixel_sdk_wrapper/control_tables.py`.
 
 ---
 
