@@ -402,7 +402,10 @@ class DynamixelSDKWrapper:
         """Sets current limit + profile duration + goal position for one servo."""
         if not self._is_servo_registered(cmd.id):
             return False
-        self.send_cmd(GoalCurrentCommand(id=cmd.id, goal_mA=cmd.current_limit_mA))
+
+        servo = self._get_servo(cmd.id)
+        if servo.operating_mode in ('current', 'current_pos'):
+            self.send_cmd(GoalCurrentCommand(id=cmd.id, goal_mA=cmd.current_limit_mA))
         self.send_cmd(ProfileTimeCommand(id=cmd.id, duration_ms=cmd.duration_ms))
 
         servo = self._get_servo(cmd.id)
