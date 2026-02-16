@@ -306,7 +306,7 @@ class GoalPositionCommand(CompoundCommand):
 class OperatingModeCommand(CompoundCommand):
     """Disables torque, then sets operating mode."""
     ids: List[int] = field(default_factory=list)
-    mode: str = 'position'
+    mode: str = 'position' # 'position', 'velocity', 'current', 'extended_pos', 'pwm', 'current_pos'
 
 @dataclass
 class DriveModeCommand(CompoundCommand):
