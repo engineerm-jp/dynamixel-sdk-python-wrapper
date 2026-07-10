@@ -285,8 +285,16 @@ class SyncGoalCurrentCommand(SyncWriteCommand):
     currents: List[int] = field(default_factory=list)
     register: str = 'GOAL_CURRENT'
 
+    # Largest GOAL_CURRENT register range across the supported control tables
+    # (XC330: 910, XM430-W350: 1193). Values beyond this would wrap in the
+    # register; per-model clamping is the caller's responsibility (the
+    # firmware CURRENT_LIMIT register is the hardware backstop).
+    MAX_ABS_GOAL_CURRENT_LSB = 1193
+
     def is_valid(self) -> bool:
-        return len(self.ids) == len(self.currents) and all(-910 <= c <= 910 for c in self.currents)
+        return (len(self.ids) == len(self.currents)
+                and all(-self.MAX_ABS_GOAL_CURRENT_LSB <= c <= self.MAX_ABS_GOAL_CURRENT_LSB
+                        for c in self.currents))
 
 @dataclass
 class SyncGoalPositionCommand(SyncWriteCommand):
