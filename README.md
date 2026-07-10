@@ -36,6 +36,24 @@ cd dynamixel-sdk-python-wrapper
 pip install .
 ```
 
+Or install a pinned ref directly (reproducible — use a tag/commit, not a branch):
+
+```bash
+pip install "git+https://github.com/engineerm-jp/dynamixel-sdk-python-wrapper.git@v0.2.0"
+```
+
+### Ubuntu / ROS 2 note (numpy conflicts)
+
+This package depends on `dynamixel-sdk` (which brings `pyserial`) and the
+standard library **only — it does not use numpy**. If `pip install` inside a
+ROS environment starts downloading or upgrading numpy, that pressure comes
+from *other* packages in the same command, not from this wrapper.
+
+On ROS 2 Humble (Ubuntu 22.04) keep the system numpy: ROS's compiled Python
+modules are built against apt's numpy 1.21, and letting pip upgrade to
+numpy ≥ 2 breaks them. If that has already happened, recover with
+`pip install "numpy<2"` and check the environment with `pip check`.
+
 ### Install in development/editable mode
 
 If you plan to modify the wrapper code:
