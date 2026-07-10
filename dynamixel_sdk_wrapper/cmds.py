@@ -28,12 +28,20 @@ class SyncReadCommand:
     """Read one register from multiple servos. Returns Dict[int, int]."""
     pass
 
+class BulkReadCommand:
+    """Read multiple registers from multiple servos. Returns Dict[int, Dict[str, int]]."""
+    pass
+
 class SingleWriteCommand:
     """Write one value to one register on one servo. Returns bool."""
     pass
 
 class SyncWriteCommand:
     """Write values to one register on multiple servos. Returns bool."""
+    pass
+
+class BulkWriteCommand:
+    """Write multiple registers to multiple servos. Returns bool."""
     pass
 
 class CompoundCommand:
@@ -62,6 +70,14 @@ class SyncWriteRegisterCommand(SyncWriteCommand):
     ids: List[int] = field(default_factory=list)
     values: List[int] = field(default_factory=list)
     register: str = ''
+
+@dataclass
+class GenericBulkWriteCommand(BulkWriteCommand):
+    """
+    Bulk write multiple registers to multiple servos.
+    targets: {servo_id: [(register_name1, value1), (register_name2, value2), ...]}
+    """
+    targets: dict = field(default_factory=dict)
 
 
 # ===================== Single Read Commands =====================
@@ -169,6 +185,14 @@ class SyncReadRegisterCommand(SyncReadCommand):
     """Generic sync read: specify any register name."""
     ids: List[int] = field(default_factory=list)
     register: str = ''
+
+@dataclass
+class GenericBulkReadCommand(BulkReadCommand):
+    """
+    Bulk read multiple registers from multiple servos.
+    targets: {servo_id: [register_name1, register_name2, ...]}
+    """
+    targets: dict = field(default_factory=dict)
 
 @dataclass
 class SyncReadPwmCommand(SyncReadCommand):
