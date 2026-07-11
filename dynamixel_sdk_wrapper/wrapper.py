@@ -110,15 +110,17 @@ class DynamixelSDKWrapper:
 
     # ========================= Public API =========================
 
-    def send_cmd(self, cmd) -> Union[int, Dict[int, int], bool]:
+    def send_cmd(self, cmd) -> Union[int, Dict[int, int], Dict[int, Dict[str, int]], bool]:
         """
         Single entry-point for all Dynamixel operations.
 
         Routes the command to the appropriate handler based on its base class:
           SingleReadCommand  → int
           SyncReadCommand    → Dict[int, int]  (signed-corrected)
+          BulkReadCommand    → Dict[int, Dict[str, int]] (signed-corrected)
           SingleWriteCommand → bool
           SyncWriteCommand   → bool
+          BulkWriteCommand   → bool
           CompoundCommand    → bool
 
         Returns INVALID_INT_VAL / {} / False on failure.
@@ -129,10 +131,14 @@ class DynamixelSDKWrapper:
             return self._handle_single_read(cmd)
         if isinstance(cmd, SyncReadCommand):
             return self._handle_sync_read(cmd)
+        if isinstance(cmd, BulkReadCommand):
+            return self._handle_bulk_read(cmd)
         if isinstance(cmd, SingleWriteCommand):
             return self._handle_single_write(cmd)
         if isinstance(cmd, SyncWriteCommand):
             return self._handle_sync_write(cmd)
+        if isinstance(cmd, BulkWriteCommand):
+            return self._handle_bulk_write(cmd)
 
         self.logger.error(f"Unknown command type: {type(cmd).__name__}")
         return False
@@ -335,6 +341,52 @@ class DynamixelSDKWrapper:
         if cmd.register in SIGNED_REGISTERS:
             return {id_: self._correct_to_signed(v, reg['LEN']) for id_, v in raw.items()}
         return raw
+
+    def _handle_bulk_read(self, cmd: BulkReadCommand) -> Dict[int, Dict[str, int]]:
+        """Read multiple registers from multiple servos. Returns {id: {reg_name: signed_value}}."""
+        if not hasattr(cmd, 'targets') or not cmd.targets:
+            return {}
+
+        # Resolve register names to dictionaries
+        read_requests = {}
+        for id_, reg_names in cmd.targets.items():
+            if not self._is_servo_registered(id_):
+                self.logger.error(f"[BulkRead] Servo ID {id_} is not registered.")
+                continue
+            servo = self._get_servo(id_)
+            read_requests[id_] = [servo.control_table[name] for name in reg_names]
+
+        raw_results = self._bulk_read(read_requests)
+
+        # Apply signed correction
+        corrected_results = {}
+        for id_, regs_data in raw_results.items():
+            corrected_results[id_] = {}
+            for reg_name, val in regs_data.items():
+                if val == self.INVALID_INT_VAL:
+                    corrected_results[id_][reg_name] = val
+                    continue
+                if reg_name in SIGNED_REGISTERS:
+                    reg_len = self._get_servo(id_).control_table[reg_name]['LEN']
+                    val = self._correct_to_signed(val, reg_len)
+                corrected_results[id_][reg_name] = val
+        return corrected_results
+
+    def _handle_bulk_write(self, cmd: BulkWriteCommand) -> bool:
+        """Write multiple registers to multiple servos. Returns bool."""
+        if not hasattr(cmd, 'targets') or not cmd.targets:
+            return False
+
+        write_requests = {}
+        for id_, reg_val_pairs in cmd.targets.items():
+            if not self._is_servo_registered(id_):
+                self.logger.error(f"[BulkWrite] Servo ID {id_} is not registered.")
+                continue
+            servo = self._get_servo(id_)
+            write_requests[id_] = [(servo.control_table[name], val) for name, val in reg_val_pairs]
+
+        res = self._bulk_write(write_requests)
+        return self._check_communication(254, 'BULK_WRITE', res)
 
     def _handle_single_write(self, cmd: SingleWriteCommand) -> bool:
         """Write one value to one register on one servo."""

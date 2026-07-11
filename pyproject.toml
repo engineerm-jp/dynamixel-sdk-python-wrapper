@@ -1,16 +1,40 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+# setuptools>=61 is the floor for PEP 621 metadata; keeping the floor low
+# avoids forcing pip to download a newer setuptools inside the isolated
+# build environment on older Ubuntu/pip installs.
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynamixel-sdk-wrapper"
-version = "0.1.0"
+version = "0.2.0"
 description = "A command-driven Python wrapper for the Dynamixel SDK"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
+# The wrapper is deliberately dependency-light: dynamixel-sdk (which brings
+# pyserial) and the standard library ONLY. It does NOT use numpy — if
+# installing this package appears to touch numpy, the resolver is acting on
+# behalf of some other package in the same install command.
 dependencies = [
-    "dynamixel-sdk",
+    "dynamixel-sdk>=3.7.31",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Embedded Systems",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
 ]
 
 [project.urls]

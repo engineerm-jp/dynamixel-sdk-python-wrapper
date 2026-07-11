@@ -28,12 +28,20 @@ class SyncReadCommand:
     """Read one register from multiple servos. Returns Dict[int, int]."""
     pass
 
+class BulkReadCommand:
+    """Read multiple registers from multiple servos. Returns Dict[int, Dict[str, int]]."""
+    pass
+
 class SingleWriteCommand:
     """Write one value to one register on one servo. Returns bool."""
     pass
 
 class SyncWriteCommand:
     """Write values to one register on multiple servos. Returns bool."""
+    pass
+
+class BulkWriteCommand:
+    """Write multiple registers to multiple servos. Returns bool."""
     pass
 
 class CompoundCommand:
@@ -62,6 +70,14 @@ class SyncWriteRegisterCommand(SyncWriteCommand):
     ids: List[int] = field(default_factory=list)
     values: List[int] = field(default_factory=list)
     register: str = ''
+
+@dataclass
+class GenericBulkWriteCommand(BulkWriteCommand):
+    """
+    Bulk write multiple registers to multiple servos.
+    targets: {servo_id: [(register_name1, value1), (register_name2, value2), ...]}
+    """
+    targets: dict = field(default_factory=dict)
 
 
 # ===================== Single Read Commands =====================
@@ -171,6 +187,14 @@ class SyncReadRegisterCommand(SyncReadCommand):
     register: str = ''
 
 @dataclass
+class GenericBulkReadCommand(BulkReadCommand):
+    """
+    Bulk read multiple registers from multiple servos.
+    targets: {servo_id: [register_name1, register_name2, ...]}
+    """
+    targets: dict = field(default_factory=dict)
+
+@dataclass
 class SyncReadPwmCommand(SyncReadCommand):
     ids: List[int] = field(default_factory=list)
     register: str = 'PRESENT_PWM'
@@ -261,8 +285,16 @@ class SyncGoalCurrentCommand(SyncWriteCommand):
     currents: List[int] = field(default_factory=list)
     register: str = 'GOAL_CURRENT'
 
+    # Largest GOAL_CURRENT register range across the supported control tables
+    # (XC330: 910, XM430-W350: 1193). Values beyond this would wrap in the
+    # register; per-model clamping is the caller's responsibility (the
+    # firmware CURRENT_LIMIT register is the hardware backstop).
+    MAX_ABS_GOAL_CURRENT_LSB = 1193
+
     def is_valid(self) -> bool:
-        return len(self.ids) == len(self.currents) and all(-910 <= c <= 910 for c in self.currents)
+        return (len(self.ids) == len(self.currents)
+                and all(-self.MAX_ABS_GOAL_CURRENT_LSB <= c <= self.MAX_ABS_GOAL_CURRENT_LSB
+                        for c in self.currents))
 
 @dataclass
 class SyncGoalPositionCommand(SyncWriteCommand):
