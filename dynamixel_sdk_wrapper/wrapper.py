@@ -96,6 +96,14 @@ class DynamixelSDKWrapper:
     SUPPRESS_ERROR_MSG = True
     INVALID_INT_VAL = -1
 
+    #: RAM registers whose sync writes are skipped when the payload is
+    #: identical to the last successful write. On a periodic control loop
+    #: these are constants (profile durations, current limits) resent every
+    #: cycle — each skip saves a full wire packet. The cache is invalidated
+    #: by any compound command, reboot, or add_servo (events after which the
+    #: register content can no longer be assumed).
+    DEDUP_REGISTERS = frozenset({'PROFILE_VELOCITY', 'GOAL_CURRENT'})
+
     def __init__(self, port: str, protocol: float = 2.0, baudrate: int = 115200):
         self.port: str = port
         self.port_handler: PortHandler = PortHandler(port)
@@ -104,6 +112,17 @@ class DynamixelSDKWrapper:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s", datefmt="[%X]")
         self.logger = logging.getLogger(__name__)
         self.baudrate = baudrate
+        # Reused group handlers, keyed by (addr, len): the SDK pattern is
+        # create-once / transact-per-cycle. Rebuilding a Group object and
+        # re-adding every param on each 100+ Hz call was pure overhead.
+        self._sync_write_groups: Dict[tuple, tuple] = {}   # (addr,len) -> (group, {ids})
+        self._sync_read_groups: Dict[tuple, tuple] = {}    # (addr,len) -> (group, tuple(ids))
+        self._last_sync_payload: Dict[str, Dict[int, List[int]]] = {}
+
+    def invalidate_write_cache(self) -> None:
+        """Forget deduplicated register payloads (forces the next sync write
+        of every DEDUP register to go out on the wire)."""
+        self._last_sync_payload.clear()
 
     def __del__(self):
         self.close_port()
@@ -126,6 +145,10 @@ class DynamixelSDKWrapper:
         Returns INVALID_INT_VAL / {} / False on failure.
         """
         if isinstance(cmd, CompoundCommand):
+            # Compound commands (torque, op-mode, reboot, drive mode, …) can
+            # change or reset RAM registers — drop the dedup cache so the
+            # next periodic sync write re-sends ground truth.
+            self._last_sync_payload.clear()
             return self._handle_compound(cmd)
         if isinstance(cmd, SingleReadCommand):
             return self._handle_single_read(cmd)
@@ -145,6 +168,11 @@ class DynamixelSDKWrapper:
 
     def add_servo(self, servos_cfg: List[ServoConfig]) -> None:
         """Adds and configures servos from a list of ServoConfig."""
+        # The id population changes: reset the reused group handlers and the
+        # dedup cache so they are rebuilt against the new servo set.
+        self._sync_write_groups.clear()
+        self._sync_read_groups.clear()
+        self._last_sync_payload.clear()
         self.suppress_error_msg(suppress=False)
         total = len(servos_cfg)
         results = {}  # label -> ('OK' | 'FAIL', reason)
@@ -566,12 +594,12 @@ class DynamixelSDKWrapper:
     def _exec_torque(self, cmd: TorqueCommand) -> bool:
         if not cmd.ids:
             return False
-        reg = self._get_servo(cmd.ids[0]).control_table['TORQUE_ENABLE']
-        group = GroupSyncWrite(self.port_handler, self.packet_handler, reg['ADDR'], reg['LEN'])
-        for i, id_ in enumerate(cmd.ids):
-            if self._is_servo_registered(id_):
-                group.addParam(id_, [1 if cmd.enable[i] else 0])
-        res = group.txPacket()
+        # Torque transitions are the natural boundary after which cached
+        # register payloads should not be assumed — force a full re-send.
+        self._last_sync_payload.clear()
+        data = {id_: [1 if cmd.enable[i] else 0]
+                for i, id_ in enumerate(cmd.ids) if self._is_servo_registered(id_)}
+        res = self._sync_write('TORQUE_ENABLE', data)
         if self._check_communication(254, 'SYNC_TORQUE', res):
             for i, id_ in enumerate(cmd.ids):
                 self._get_servo(id_).torque_status = cmd.enable[i]
@@ -583,11 +611,9 @@ class DynamixelSDKWrapper:
             self.logger.error("Sync set goal current failed: command is invalid.")
             return False
         reg = self._get_servo(cmd.ids[0]).control_table['GOAL_CURRENT']
-        group = GroupSyncWrite(self.port_handler, self.packet_handler, reg['ADDR'], reg['LEN'])
-        for i, id_ in enumerate(cmd.ids):
-            if self._is_servo_registered(id_):
-                group.addParam(id_, self._convert_to_bytes(cmd.currents[i], reg['LEN']))
-        res = group.txPacket()
+        data = {id_: self._convert_to_bytes(cmd.currents[i], reg['LEN'])
+                for i, id_ in enumerate(cmd.ids) if self._is_servo_registered(id_)}
+        res = self._sync_write('GOAL_CURRENT', data)
         return self._check_communication(254, 'SYNC_GOAL_CURRENT', res)
 
     def _exec_sync_goal_position(self, cmd: SyncGoalPositionCommand) -> bool:
@@ -649,12 +675,43 @@ class DynamixelSDKWrapper:
     def _sync_write(self, reg_name: str, data: Dict[int, List[int]]):
         if not data:
             return COMM_SUCCESS
+
+        # Skip the wire entirely when a dedup-eligible payload is unchanged
+        # (profile durations / current limits are constants on a periodic
+        # control loop — resending them every cycle doubled the TX packets).
+        dedup = reg_name in self.DEDUP_REGISTERS
+        if dedup and self._last_sync_payload.get(reg_name) == data:
+            return COMM_SUCCESS
+
         first_id = next(iter(data))
         reg = self._get_servo(first_id).control_table[reg_name]
-        group = GroupSyncWrite(self.port_handler, self.packet_handler, reg['ADDR'], reg['LEN'])
+        key = (reg['ADDR'], reg['LEN'])
+        cached = self._sync_write_groups.get(key)
+        if cached is None:
+            group, known_ids = GroupSyncWrite(
+                self.port_handler, self.packet_handler, reg['ADDR'], reg['LEN']), set()
+            self._sync_write_groups[key] = (group, known_ids)
+        else:
+            group, known_ids = cached
+
+        # Reuse the group across cycles: addParam only for new ids,
+        # changeParam for the rest (the SDK's intended periodic pattern).
+        stale = known_ids - data.keys()
+        if stale:
+            for id_ in stale:
+                group.removeParam(id_)
+            known_ids -= stale
         for id_, param_data in data.items():
-            group.addParam(id_, param_data)
-        return group.txPacket()
+            if id_ in known_ids:
+                group.changeParam(id_, param_data)
+            else:
+                group.addParam(id_, param_data)
+                known_ids.add(id_)
+
+        result = group.txPacket()
+        if dedup and result == COMM_SUCCESS:
+            self._last_sync_payload[reg_name] = dict(data)
+        return result
 
     def _sync_read(self, ids: Union[int, List[int]], reg_name: str) -> Dict[int, int]:
         """Synchronous read of one register from multiple servos (raw unsigned values)."""
@@ -663,17 +720,25 @@ class DynamixelSDKWrapper:
         first_id = ids[0]
         reg = self._get_servo(first_id).control_table[reg_name]
 
-        group = GroupSyncRead(self.port_handler, self.packet_handler, reg['ADDR'], reg['LEN'])
-        for id_ in ids:
-            if not group.addParam(id_):
-                self.logger.error(f"[SyncRead] Failed to add param for ID {id_}.")
-                group.clearParam()
-                return {}
+        # Reuse the group handler when the id set is unchanged (the 100+ Hz
+        # state loop reads the same ids every cycle; params persist across
+        # txRxPacket calls, so re-adding them per call was pure overhead).
+        key = (reg['ADDR'], reg['LEN'])
+        ids_key = tuple(ids)
+        cached = self._sync_read_groups.get(key)
+        if cached is not None and cached[1] == ids_key:
+            group = cached[0]
+        else:
+            group = GroupSyncRead(self.port_handler, self.packet_handler, reg['ADDR'], reg['LEN'])
+            for id_ in ids:
+                if not group.addParam(id_):
+                    self.logger.error(f"[SyncRead] Failed to add param for ID {id_}.")
+                    return {}
+            self._sync_read_groups[key] = (group, ids_key)
 
         comm_result = group.txRxPacket()
         if comm_result != COMM_SUCCESS:
             self._check_communication(254, 'SYNC_READ_TXRX', comm_result)
-            group.clearParam()
             return {}
 
         results = {}
@@ -683,8 +748,6 @@ class DynamixelSDKWrapper:
             else:
                 self.logger.warning(f"[SyncRead] No data available for ID {id_}.")
                 results[id_] = self.INVALID_INT_VAL
-
-        group.clearParam()
         return results
 
     def _bulk_write(self, write_requests: Dict[int, List[tuple]]) -> int:
