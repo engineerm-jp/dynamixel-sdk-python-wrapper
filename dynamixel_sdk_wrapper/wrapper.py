@@ -37,7 +37,12 @@ SIGNED_REGISTERS = frozenset({
 
 @dataclass
 class ServoConfig:
-    """User-facing configuration for registering a Dynamixel servo."""
+    """User-facing configuration for registering a Dynamixel servo.
+
+    Only ``id_`` and ``model`` are required. Every optional field left as
+    ``None`` is simply not written to the servo during ``add_servo()``;
+    fields marked EEPROM persist across power cycles.
+    """
     id_: int
     model: str
     name: str = ''
@@ -90,7 +95,28 @@ class Servo:
 
 
 class DynamixelSDKWrapper:
-    """Command-driven wrapper for the Dynamixel SDK."""
+    """Command-driven wrapper for the Dynamixel SDK.
+
+    All bus operations go through :meth:`send_cmd`, which dispatches on the
+    command's base class (see ``cmds.py``). Typical lifecycle::
+
+        dxl = DynamixelSDKWrapper(port="/dev/ttyUSB0", baudrate=4_000_000)
+        dxl.open_port()
+        dxl.add_servo([ServoConfig(id_=1, model="XC330")])
+        dxl.send_cmd(TorqueCommand(ids=[1], enable=[True]))
+        ...
+        dxl.close_port()
+
+    Communication failures never raise; they return sentinels
+    (``INVALID_INT_VAL`` / ``{}`` / ``False``). Enable SDK error logging
+    with :meth:`suppress_error_msg`.
+
+    Attributes:
+        servos: Registered servos keyed by bus ID.
+        INVALID_INT_VAL: Sentinel returned by failed single reads (-1).
+        DEDUP_REGISTERS: RAM registers whose unchanged periodic sync-write
+            payloads are skipped off the wire (see :meth:`invalidate_write_cache`).
+    """
 
     CONTROL_TABLES = CONTROL_TABLE
     SUPPRESS_ERROR_MSG = True
@@ -105,6 +131,13 @@ class DynamixelSDKWrapper:
     DEDUP_REGISTERS = frozenset({'PROFILE_VELOCITY', 'GOAL_CURRENT'})
 
     def __init__(self, port: str, protocol: float = 2.0, baudrate: int = 115200):
+        """Create a wrapper bound to one serial port.
+
+        Args:
+            port: Serial device, e.g. ``"COM3"`` or ``"/dev/ttyUSB0"``.
+            protocol: Dynamixel protocol version (2.0 for all X-series).
+            baudrate: Bus baud rate; applied when :meth:`open_port` is called.
+        """
         self.port: str = port
         self.port_handler: PortHandler = PortHandler(port)
         self.packet_handler: PacketHandler = PacketHandler(protocol)
@@ -142,7 +175,13 @@ class DynamixelSDKWrapper:
           BulkWriteCommand   → bool
           CompoundCommand    → bool
 
-        Returns INVALID_INT_VAL / {} / False on failure.
+        Args:
+            cmd: Any command dataclass from ``dynamixel_sdk_wrapper.cmds``.
+
+        Returns:
+            The value per the table above; on communication failure a
+            sentinel: ``INVALID_INT_VAL`` (-1), ``{}``, or ``False``.
+            Never raises on bus errors.
         """
         if isinstance(cmd, CompoundCommand):
             # Compound commands (torque, op-mode, reboot, drive mode, …) can
@@ -167,7 +206,18 @@ class DynamixelSDKWrapper:
         return False
 
     def add_servo(self, servos_cfg: List[ServoConfig]) -> None:
-        """Adds and configures servos from a list of ServoConfig."""
+        """Register and configure servos from a list of :class:`ServoConfig`.
+
+        For each servo: ping / read firmware, disable torque, set the
+        operating mode, apply startup + drive-mode configuration
+        (time-based profile), and write every optional limit/EEPROM field
+        provided. Each servo gets up to 5 attempts; a per-servo summary is
+        logged at the end. Already-registered IDs and unsupported models
+        are skipped with a log entry rather than raising.
+
+        Args:
+            servos_cfg: One :class:`ServoConfig` per servo to register.
+        """
         # The id population changes: reset the reused group handlers and the
         # dedup cache so they are rebuilt against the new servo set.
         self._sync_write_groups.clear()
@@ -324,7 +374,13 @@ class DynamixelSDKWrapper:
         self.servos[id_].firmware_ver = fw
         return True
 
-    def open_port(self):
+    def open_port(self) -> bool:
+        """Open the serial port and apply the configured baud rate.
+
+        Returns:
+            True on success, False if the port could not be opened or the
+            baud rate could not be set.
+        """
         if self.port_handler.openPort():
             self.logger.info(f"Port {self.port} opened.")
             if self.port_handler.setBaudRate(self.baudrate):
@@ -333,12 +389,18 @@ class DynamixelSDKWrapper:
         self.logger.error(f"Failed to open port {self.port} or set baudrate.")
         return False
 
-    def close_port(self):
+    def close_port(self) -> None:
+        """Close the serial port if it is open (idempotent)."""
         if self.port_handler.is_open:
             self.port_handler.closePort()
             self.logger.info(f"Port {self.port} closed.")
 
-    def suppress_error_msg(self, suppress: bool):
+    def suppress_error_msg(self, suppress: bool) -> None:
+        """Toggle logging of SDK packet/communication errors.
+
+        Suppressed by default; pass ``False`` while debugging to see the
+        underlying TxRx result and packet error for every failure.
+        """
         self.SUPPRESS_ERROR_MSG = suppress
 
     # =================== Command Handlers ===================
