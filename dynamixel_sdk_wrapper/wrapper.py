@@ -16,8 +16,8 @@ Commands are routed by their base class:
 
 from dynamixel_sdk import (
     PacketHandler, PortHandler, GroupBulkWrite,
-    GroupBulkRead, GroupSyncWrite, GroupSyncRead, COMM_SUCCESS, DXL_LOWORD,
-    DXL_HIWORD, DXL_LOBYTE, DXL_HIBYTE
+    GroupBulkRead, GroupSyncWrite, GroupSyncRead, COMM_SUCCESS,
+    COMM_RX_CORRUPT, DXL_LOWORD, DXL_HIWORD, DXL_LOBYTE, DXL_HIBYTE
 )
 
 from dynamixel_sdk_wrapper.cmds import *
@@ -724,9 +724,18 @@ class DynamixelSDKWrapper:
 
     def _readTxRx(self, id_: int, reg: dict):
         length, addr = reg['LEN'], reg['ADDR']
-        if length == 1: return self.packet_handler.read1ByteTxRx(self.port_handler, id_, addr)
-        if length == 2: return self.packet_handler.read2ByteTxRx(self.port_handler, id_, addr)
-        return self.packet_handler.read4ByteTxRx(self.port_handler, id_, addr)
+        # The SDK can accept a truncated/corrupted status packet as
+        # COMM_SUCCESS and then crash indexing its short data buffer
+        # (IndexError: list index out of range) — seen on marginal buses.
+        # Honor the "never raises on bus errors" contract: report RX
+        # corruption instead.
+        try:
+            if length == 1: return self.packet_handler.read1ByteTxRx(self.port_handler, id_, addr)
+            if length == 2: return self.packet_handler.read2ByteTxRx(self.port_handler, id_, addr)
+            return self.packet_handler.read4ByteTxRx(self.port_handler, id_, addr)
+        except IndexError:
+            self.logger.error(f"ID {id_}: truncated status packet on read @{addr}")
+            return 0, COMM_RX_CORRUPT, 0
 
     def _writeTxRx(self, id_: int, reg: dict, data: int):
         length, addr = reg['LEN'], reg['ADDR']
@@ -798,14 +807,24 @@ class DynamixelSDKWrapper:
                     return {}
             self._sync_read_groups[key] = (group, ids_key)
 
-        comm_result = group.txRxPacket()
+        try:
+            comm_result = group.txRxPacket()
+        except IndexError:
+            # Truncated/garbled status packet inside the SDK's parser —
+            # treat like any other RX corruption instead of raising.
+            self.logger.error("[SyncRead] truncated status packet")
+            return {}
         if comm_result != COMM_SUCCESS:
             self._check_communication(254, 'SYNC_READ_TXRX', comm_result)
             return {}
 
         results = {}
         for id_ in ids:
-            if group.isAvailable(id_, reg['ADDR'], reg['LEN']):
+            try:
+                available = group.isAvailable(id_, reg['ADDR'], reg['LEN'])
+            except IndexError:
+                available = False
+            if available:
                 results[id_] = group.getData(id_, reg['ADDR'], reg['LEN'])
             else:
                 self.logger.warning(f"[SyncRead] No data available for ID {id_}.")
