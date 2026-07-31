@@ -389,6 +389,21 @@ class HomingOffsetCommand(EepromWriteCommand):
     servo_attr: str = 'homing_offset'
 
 @dataclass
+class ReturnDelayCommand(EepromWriteCommand):
+    """Sets Return Delay Time (EEPROM), in 2 us units.
+
+    The factory default is 250 == 500 us of dead bus time BEFORE each
+    status packet. On a sync read every servo pays it in series, so a
+    13-servo chain wastes 6.5 ms per read regardless of baud rate — far
+    more than the packets themselves cost. 0 is correct for a modern
+    host; the value exists for microcontrollers too slow to turn the
+    line around.
+    """
+    value: int = 0
+    register: str = 'RETURN_DELAY_TIME'
+
+
+@dataclass
 class CurrentLimitCommand(EepromWriteCommand):
     """Sets current limit in mA (EEPROM)."""
     value: int = 910

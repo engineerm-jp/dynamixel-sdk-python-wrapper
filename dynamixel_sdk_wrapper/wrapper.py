@@ -264,11 +264,18 @@ class DynamixelSDKWrapper:
                     ('Disable torque',     lambda: self.send_cmd(TorqueCommand(ids=[id_], enable=[False])), None),
                     ('Operating mode',     lambda: self.send_cmd(OperatingModeCommand(ids=[id_], mode=op_mode)), lambda: op_mode),
                     ('Startup config',     lambda: self.send_cmd(StartupConfigCommand(id=id_, restore_ram=True, torque_enable=False)), None),
+                    # Factory default is 250 (== 500 us of dead bus time
+                    # before EVERY status packet). On a sync read the whole
+                    # chain pays it in series, so 13 servos waste 6.5 ms per
+                    # read no matter the baud rate. Zero it at registration.
+                    ('Return delay',       lambda: self.send_cmd(ReturnDelayCommand(id=id_, value=0)), lambda: '0 us'),
                     ('Reverse mode',       lambda: self.send_cmd(DriveModeCommand(id=id_, mode='reverse_mode', enable=reverse)), lambda: str(reverse)),
                     ('Time-based profile', lambda: self.send_cmd(DriveModeCommand(id=id_, mode='profile', enable=True)), None),
                 ]
                 if lim:
-                    steps.insert(5, ('Position limits', lambda: self.send_cmd(
+                    # Keep position limits immediately before the profile
+                    # step, as before the return-delay step was added.
+                    steps.insert(6, ('Position limits', lambda: self.send_cmd(
                         PositionLimitCommand(id=id_, min_pos=lim[0], max_pos=lim[1])
                     ), lambda: f"{lim[0]} .. {lim[1]}"))
 
