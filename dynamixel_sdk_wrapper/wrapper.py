@@ -614,7 +614,13 @@ class DynamixelSDKWrapper:
         if not self._is_servo_registered(cmd.id):
             return False
         res, err = self.packet_handler.reboot(self.port_handler, cmd.id)
-        return self._check_communication(cmd.id, 'REBOOT', res, err)
+        ok = self._check_communication(cmd.id, 'REBOOT', res, err)
+        if ok:
+            # A reboot turns the servo's torque OFF. Keep the cache honest:
+            # with a stale True, the next EEPROM write's torque-restore dance
+            # (_exec_eeprom_write) would silently torque the motor back on.
+            self._get_servo(cmd.id).torque_status = False
+        return ok
 
     # ============== EEPROM Write Executors ==============
 
