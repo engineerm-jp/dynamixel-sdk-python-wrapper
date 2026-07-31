@@ -128,7 +128,8 @@ class DynamixelSDKWrapper:
     #: cycle — each skip saves a full wire packet. The cache is invalidated
     #: by any compound command, reboot, or add_servo (events after which the
     #: register content can no longer be assumed).
-    DEDUP_REGISTERS = frozenset({'PROFILE_VELOCITY', 'GOAL_CURRENT'})
+    DEDUP_REGISTERS = frozenset({'PROFILE_VELOCITY', 'PROFILE_ACCELERATION',
+                                 'GOAL_CURRENT'})
 
     def __init__(self, port: str, protocol: float = 2.0, baudrate: int = 115200):
         """Create a wrapper bound to one serial port.
@@ -701,14 +702,22 @@ class DynamixelSDKWrapper:
                 return False
             self.send_cmd(SyncGoalCurrentCommand(ids=cmd.ids, currents=cmd.current_limits))
 
-        pos_to_send, duration_to_send = {}, {}
+        pos_to_send, duration_to_send, accel_to_send = {}, {}, {}
         for i, id_ in enumerate(cmd.ids):
             servo = self._get_servo(id_)
             pos_len = servo.control_table['GOAL_POSITION']['LEN']
             dur_len = servo.control_table['PROFILE_VELOCITY']['LEN']
             pos_to_send[id_] = self._convert_to_bytes(cmd.positions[i], pos_len)
             duration_to_send[id_] = self._convert_to_bytes(cmd.durations[i], dur_len)
+            if cmd.accels:
+                acc_len = servo.control_table['PROFILE_ACCELERATION']['LEN']
+                accel_to_send[id_] = self._convert_to_bytes(cmd.accels[i], acc_len)
 
+        # Profile parameters must land BEFORE the goal that uses them.
+        # Both are deduped, so on a periodic stream of identical profiles
+        # they cost one packet each at the start and nothing thereafter.
+        if accel_to_send:
+            self._sync_write('PROFILE_ACCELERATION', accel_to_send)
         res1 = self._sync_write('PROFILE_VELOCITY', duration_to_send)
         res2 = self._sync_write('GOAL_POSITION', pos_to_send)
         return (self._check_communication(254, 'SYNC_VELOCITY', res1)

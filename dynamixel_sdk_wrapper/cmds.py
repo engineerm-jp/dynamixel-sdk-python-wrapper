@@ -298,10 +298,19 @@ class SyncGoalCurrentCommand(SyncWriteCommand):
 
 @dataclass
 class SyncGoalPositionCommand(SyncWriteCommand):
-    """Also sets profile velocity and optionally current limits."""
+    """Also sets the profile and optionally current limits.
+
+    Under a TIME-BASED profile (Drive Mode bit 2), ``durations`` is the
+    total move time in ms and ``accels`` the acceleration ramp time in ms
+    (firmware clamps it to half the duration). Give every servo in one
+    command the SAME pair and their normalized trajectories are identical
+    regardless of travel distance — which is what keeps mechanically
+    coupled actuators (tendons on a shared joint) moving in lockstep.
+    """
     ids: List[int] = field(default_factory=list)
     positions: List[int] = field(default_factory=list)
     durations: List[int] = field(default_factory=list)
+    accels: List[int] = field(default_factory=list)
     current_limits: List[int] = field(default_factory=list)
     register: str = 'GOAL_POSITION'
 
