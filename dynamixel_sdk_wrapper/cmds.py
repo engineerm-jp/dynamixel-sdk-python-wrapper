@@ -298,10 +298,19 @@ class SyncGoalCurrentCommand(SyncWriteCommand):
 
 @dataclass
 class SyncGoalPositionCommand(SyncWriteCommand):
-    """Also sets profile velocity and optionally current limits."""
+    """Also sets the profile and optionally current limits.
+
+    Under a TIME-BASED profile (Drive Mode bit 2), ``durations`` is the
+    total move time in ms and ``accels`` the acceleration ramp time in ms
+    (firmware clamps it to half the duration). Give every servo in one
+    command the SAME pair and their normalized trajectories are identical
+    regardless of travel distance — which is what keeps mechanically
+    coupled actuators (tendons on a shared joint) moving in lockstep.
+    """
     ids: List[int] = field(default_factory=list)
     positions: List[int] = field(default_factory=list)
     durations: List[int] = field(default_factory=list)
+    accels: List[int] = field(default_factory=list)
     current_limits: List[int] = field(default_factory=list)
     register: str = 'GOAL_POSITION'
 
@@ -387,6 +396,21 @@ class HomingOffsetCommand(EepromWriteCommand):
     """Sets homing offset (EEPROM)."""
     register: str = 'HOMING_OFFSET'
     servo_attr: str = 'homing_offset'
+
+@dataclass
+class ReturnDelayCommand(EepromWriteCommand):
+    """Sets Return Delay Time (EEPROM), in 2 us units.
+
+    The factory default is 250 == 500 us of dead bus time BEFORE each
+    status packet. On a sync read every servo pays it in series, so a
+    13-servo chain wastes 6.5 ms per read regardless of baud rate — far
+    more than the packets themselves cost. 0 is correct for a modern
+    host; the value exists for microcontrollers too slow to turn the
+    line around.
+    """
+    value: int = 0
+    register: str = 'RETURN_DELAY_TIME'
+
 
 @dataclass
 class CurrentLimitCommand(EepromWriteCommand):
