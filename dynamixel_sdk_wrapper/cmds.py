@@ -187,6 +187,21 @@ class SyncReadRegisterCommand(SyncReadCommand):
     register: str = ''
 
 @dataclass
+class SyncReadStateCommand(SyncReadCommand):
+    """Present current + velocity + position in ONE bus transaction.
+
+    Those three registers are contiguous (126..135 on the X-series), so a
+    single sync read covers all of them: one instruction packet and one
+    status packet per servo instead of three. On a periodic state loop
+    that is 3x fewer bus round trips and 3x less per-packet host work.
+
+    Returns ``{id: {'PRESENT_CURRENT': int, 'PRESENT_VELOCITY': int,
+    'PRESENT_POSITION': int}}``, sign-corrected per field.
+    """
+    ids: List[int] = field(default_factory=list)
+    register: str = 'PRESENT_CURRENT'      # start of the contiguous block
+
+@dataclass
 class GenericBulkReadCommand(BulkReadCommand):
     """
     Bulk read multiple registers from multiple servos.

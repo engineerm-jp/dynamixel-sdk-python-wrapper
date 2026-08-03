@@ -9,6 +9,7 @@ Public API:
 Commands are routed by their base class:
   SingleReadCommand  → _handle_single_read   → int
   SyncReadCommand    → _handle_sync_read     → Dict[int, int]
+  SyncReadStateCommand → _handle_sync_read_state → Dict[int, Dict[str, int]]
   SingleWriteCommand → _handle_single_write  → bool
   SyncWriteCommand   → _handle_sync_write    → bool
   CompoundCommand    → _handle_compound      → bool
@@ -170,6 +171,7 @@ class DynamixelSDKWrapper:
         Routes the command to the appropriate handler based on its base class:
           SingleReadCommand  → int
           SyncReadCommand    → Dict[int, int]  (signed-corrected)
+          SyncReadStateCommand → Dict[int, Dict[str, int]] (one transaction)
           BulkReadCommand    → Dict[int, Dict[str, int]] (signed-corrected)
           SingleWriteCommand → bool
           SyncWriteCommand   → bool
@@ -192,6 +194,8 @@ class DynamixelSDKWrapper:
             return self._handle_compound(cmd)
         if isinstance(cmd, SingleReadCommand):
             return self._handle_single_read(cmd)
+        if isinstance(cmd, SyncReadStateCommand):     # before SyncReadCommand
+            return self._handle_sync_read_state(cmd)
         if isinstance(cmd, SyncReadCommand):
             return self._handle_sync_read(cmd)
         if isinstance(cmd, BulkReadCommand):
@@ -439,6 +443,54 @@ class DynamixelSDKWrapper:
         if cmd.register in SIGNED_REGISTERS:
             return {id_: self._correct_to_signed(v, reg['LEN']) for id_, v in raw.items()}
         return raw
+
+    def _handle_sync_read_state(self, cmd) -> Dict[int, Dict[str, int]]:
+        """Current + velocity + position from ONE group read.
+
+        The SDK's ``getData`` only decodes 1/2/4-byte fields, so the group
+        covers the whole 10-byte window and each field is extracted at its
+        own address — legal because every sub-range lies inside the
+        window that was actually fetched.
+        """
+        if not cmd.ids:
+            return {}
+        first_id = cmd.ids[0]
+        if not self._is_servo_registered(first_id):
+            self.logger.error(f"[SyncReadState] Servo ID {first_id} is not registered.")
+            return {}
+        table = self._get_servo(first_id).control_table
+        fields = [table['PRESENT_CURRENT'], table['PRESENT_VELOCITY'],
+                  table['PRESENT_POSITION']]
+        names = ['PRESENT_CURRENT', 'PRESENT_VELOCITY', 'PRESENT_POSITION']
+        start = min(f['ADDR'] for f in fields)
+        end = max(f['ADDR'] + f['LEN'] for f in fields)
+
+        group = self._read_group(cmd.ids, start, end - start)
+        if group is None:
+            return {}
+        try:
+            comm_result = group.txRxPacket()
+        except IndexError:
+            self.logger.error("[SyncReadState] truncated status packet")
+            return {}
+        if comm_result != COMM_SUCCESS:
+            self._check_communication(254, 'SYNC_READ_STATE', comm_result)
+            return {}
+
+        out: Dict[int, Dict[str, int]] = {}
+        for id_ in cmd.ids:
+            try:
+                if not group.isAvailable(id_, start, end - start):
+                    self.logger.warning(f"[SyncReadState] No data for ID {id_}.")
+                    continue
+                out[id_] = {
+                    name: self._correct_to_signed(
+                        group.getData(id_, f['ADDR'], f['LEN']), f['LEN'])
+                    for name, f in zip(names, fields)
+                }
+            except IndexError:
+                self.logger.warning(f"[SyncReadState] short buffer for ID {id_}.")
+        return out
 
     def _handle_bulk_read(self, cmd: BulkReadCommand) -> Dict[int, Dict[str, int]]:
         """Read multiple registers from multiple servos. Returns {id: {reg_name: signed_value}}."""
@@ -805,6 +857,26 @@ class DynamixelSDKWrapper:
         if dedup and result == COMM_SUCCESS:
             self._last_sync_payload[reg_name] = dict(data)
         return result
+
+    def _read_group(self, ids: List[int], addr: int, length: int):
+        """Cached GroupSyncRead over one address window, or None on failure.
+
+        Reuse matters: the state loop reads the same ids every cycle, and
+        params persist across txRxPacket calls, so re-adding them per call
+        was pure overhead.
+        """
+        key = (addr, length)
+        ids_key = tuple(ids)
+        cached = self._sync_read_groups.get(key)
+        if cached is not None and cached[1] == ids_key:
+            return cached[0]
+        group = GroupSyncRead(self.port_handler, self.packet_handler, addr, length)
+        for id_ in ids:
+            if not group.addParam(id_):
+                self.logger.error(f"[SyncRead] Failed to add param for ID {id_}.")
+                return None
+        self._sync_read_groups[key] = (group, ids_key)
+        return group
 
     def _sync_read(self, ids: Union[int, List[int]], reg_name: str) -> Dict[int, int]:
         """Synchronous read of one register from multiple servos (raw unsigned values)."""
