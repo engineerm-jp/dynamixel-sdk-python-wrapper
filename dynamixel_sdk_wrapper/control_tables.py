@@ -34,6 +34,13 @@ CONTROL_TABLE = {
         'STATUS_RETURN_LEVEL':    {'ADDR': 68,   'LEN': 1},    # Status Return Level: 0 = No Return, 1 = Read-only, 2 = All
         'REGISTERED_INSTRUCTION': {'ADDR': 69,   'LEN': 1},    # Registered Instruction: 0 = No, 1 = Yes
         'HARDWARE_ERROR_STATUS':  {'ADDR': 70,   'LEN': 1},    # Hardware Error Status: Bit flags for error status
+        'VELOCITY_I_GAIN':        {'ADDR': 76,   'LEN': 2},    # Velocity I Gain:    0 ~ 16,383 (RAM; reset to default on mode change)
+        'VELOCITY_P_GAIN':        {'ADDR': 78,   'LEN': 2},    # Velocity P Gain:    0 ~ 16,383
+        'POSITION_D_GAIN':        {'ADDR': 80,   'LEN': 2},    # Position D Gain:    0 ~ 16,383
+        'POSITION_I_GAIN':        {'ADDR': 82,   'LEN': 2},    # Position I Gain:    0 ~ 16,383
+        'POSITION_P_GAIN':        {'ADDR': 84,   'LEN': 2},    # Position P Gain:    0 ~ 16,383 (default 900; PWM = P/128 per tick of error)
+        'FEEDFORWARD_2ND_GAIN':   {'ADDR': 88,   'LEN': 2},    # Feedforward 2nd Gain: 0 ~ 16,383
+        'FEEDFORWARD_1ST_GAIN':   {'ADDR': 90,   'LEN': 2},    # Feedforward 1st Gain: 0 ~ 16,383
         'BUS_WATCHDOG':           {'ADDR': 98,   'LEN': 1},    # Bus Watchdog Timeout: Range 1 ~ 127 (in 20ms increments)
         'GOAL_PWM':               {'ADDR': 100,  'LEN': 2},    # Goal PWM:           Desired PWM Output: Range -PWM Limit ~ PWM Limit (in 0.113%)
         'GOAL_CURRENT':           {'ADDR': 102,  'LEN': 2},    # Goal Current:       Desired Current Output: Range -Current Limit ~ Current Limit (in 1.0mA)

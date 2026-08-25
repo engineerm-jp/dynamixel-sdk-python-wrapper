@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 SIGNED_REGISTERS = frozenset({
     'PRESENT_POSITION', 'PRESENT_VELOCITY', 'PRESENT_CURRENT',
     'GOAL_POSITION', 'GOAL_VELOCITY', 'GOAL_CURRENT',
+    'PRESENT_PWM', 'GOAL_PWM',
     'HOMING_OFFSET',
 })
 
